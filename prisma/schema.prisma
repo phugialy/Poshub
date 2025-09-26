@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model UserProfile {
+  id         String   @id // NextAuth.js user ID
+  email      String   @unique
+  fullName   String?  @map("full_name")
+  avatarUrl  String?  @map("avatar_url")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  trackingRequests TrackingRequest[]
+
+  @@map("user_profiles")
+}
+
+model Carrier {
+  id          String   @id @default(uuid())
+  name        String   @unique // 'USPS', 'UPS', 'FedEx', 'DHL'
+  displayName String   @map("display_name")
+  apiEndpoint String?  @map("api_endpoint")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  trackingRequests TrackingRequest[]
+
+  @@map("carriers")
+}
+
+model TrackingRequest {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  trackingNumber String    @map("tracking_number")
+  carrierId      String    @map("carrier_id")
+  status         String    @default("pending") // 'pending', 'processing', 'completed', 'failed'
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  carrier Carrier     @relation(fields: [carrierId], references: [id])
+  shipment Shipment?
+
+  @@map("tracking_requests")
+}
+
+model Shipment {
+  id                    String    @id @default(uuid())
+  trackingRequestId     String    @unique @map("tracking_request_id")
+  trackingNumber        String    @map("tracking_number")
+  carrier               String
+  expectedDeliveryDate  DateTime? @map("expected_delivery_date")
+  currentStatus         String?   @map("current_status")
+  currentLocation       String?   @map("current_location")
+  shippedDate           DateTime? @map("shipped_date")
+  rawData               Json?     @map("raw_data")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  trackingRequest TrackingRequest @relation(fields: [trackingRequestId], references: [id], onDelete: Cascade)
+
+  @@map("shipments")
+}
