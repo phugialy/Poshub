@@ -61,10 +61,18 @@ async function checkAuth() {
             });
             
             if (response.ok) {
-                const session = await response.json();
-                currentUser = session.user;
-                showDashboard();
-                await loadDashboardData();
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    const session = await response.json();
+                    currentUser = session.user;
+                    showDashboard();
+                    await loadDashboardData();
+                } else {
+                    console.error('Non-JSON response from session endpoint');
+                    localStorage.removeItem('auth_token');
+                    showLogin();
+                }
             } else {
                 localStorage.removeItem('auth_token');
                 showLogin();
@@ -134,7 +142,29 @@ async function signInWithGooglePopup() {
         
         // Get the OAuth URL from server
         const response = await fetch(`${NEXTAUTH_URL}/api/auth/google-url`);
+        
+        // Check if response is successful
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server error:', response.status, errorText);
+            throw new Error(`Server error: ${response.status} - ${errorText}`);
+        }
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const responseText = await response.text();
+            console.error('Non-JSON response:', responseText);
+            throw new Error('Server returned non-JSON response');
+        }
+        
         const data = await response.json();
+        
+        // Validate response data
+        if (!data || !data.authUrl) {
+            console.error('Invalid response data:', data);
+            throw new Error('Invalid response from server');
+        }
         
         // Open popup window
         const popup = window.open(
@@ -201,6 +231,14 @@ async function handleTrackingSubmit(e) {
             body: JSON.stringify(trackingData)
         });
         
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const responseText = await response.text();
+            console.error('Non-JSON response:', responseText);
+            throw new Error('Server returned non-JSON response');
+        }
+        
         const result = await response.json();
         
         if (!response.ok) {
@@ -248,14 +286,30 @@ async function loadDashboardData() {
             })
         ]);
         
-        const dashboardData = await dashboardResponse.json();
-        const requestsData = await requestsResponse.json();
-        
         if (dashboardResponse.ok) {
-            updateDashboardStats(dashboardData.stats);
-            updateTrackingList(requestsData.requests);
+            // Check if response is JSON
+            const dashboardContentType = dashboardResponse.headers.get('content-type');
+            if (dashboardContentType && dashboardContentType.includes('application/json')) {
+                const dashboardData = await dashboardResponse.json();
+                updateDashboardStats(dashboardData.stats);
+            } else {
+                console.error('Non-JSON response from dashboard endpoint');
+            }
         } else {
-            console.error('Dashboard data error:', dashboardData);
+            console.error('Dashboard response error:', dashboardResponse.status);
+        }
+        
+        if (requestsResponse.ok) {
+            // Check if response is JSON
+            const requestsContentType = requestsResponse.headers.get('content-type');
+            if (requestsContentType && requestsContentType.includes('application/json')) {
+                const requestsData = await requestsResponse.json();
+                updateTrackingList(requestsData.requests);
+            } else {
+                console.error('Non-JSON response from requests endpoint');
+            }
+        } else {
+            console.error('Requests response error:', requestsResponse.status);
         }
         
     } catch (error) {
