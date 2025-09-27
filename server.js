@@ -9,6 +9,8 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const trackingRoutes = require('./routes/tracking');
 const userRoutes = require('./routes/user');
+const externalRoutes = require('./routes/external');
+const dashboardRoutes = require('./routes/dashboard');
 
 // Initialize Prisma client
 require('./lib/prisma');
@@ -20,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://yourdomain.com'] 
+    ? [process.env.FRONTEND_URL || 'https://yourdomain.com'] 
     : ['http://localhost:3000', 'http://localhost:3001'],
   credentials: true
 }));
@@ -46,6 +48,8 @@ app.use(express.static('public'));
 app.use('/api/auth', authRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/external', externalRoutes);
+app.use('/api/external/dashboard', dashboardRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -71,9 +75,12 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`PostalHub Backend Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// Only start server if not in Vercel environment
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`PostalHub Backend Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
 
 module.exports = app;

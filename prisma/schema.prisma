@@ -45,6 +45,7 @@ model TrackingRequest {
   trackingNumber String    @map("tracking_number")
   carrierId      String    @map("carrier_id")
   status         String    @default("pending") // 'pending', 'processing', 'completed', 'failed'
+  metadata       Json?     // Store external app metadata
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
