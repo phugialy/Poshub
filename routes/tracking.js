@@ -183,6 +183,306 @@ router.get('/requests/:id', verifyNextAuthToken, async (req, res) => {
 });
 
 /**
+ * POST /api/tracking/add
+ * Add a new tracking item (frontend compatibility endpoint)
+ */
+router.post('/add', 
+  verifyNextAuthToken,
+  [
+    body('trackingNumber')
+      .isString()
+      .isLength({ min: 8, max: 50 })
+      .withMessage('Tracking number must be between 8 and 50 characters'),
+    body('brand')
+      .isString()
+      .isIn(['USPS', 'UPS', 'FedEx', 'DHL'])
+      .withMessage('Brand must be one of: USPS, UPS, FedEx, DHL'),
+    body('description')
+      .optional()
+      .isString()
+      .withMessage('Description must be a string')
+  ],
+  async (req, res) => {
+    try {
+      // Validate input
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: errors.array() 
+        });
+      }
+
+      const { trackingNumber, brand, description } = req.body;
+      const userId = req.user.id;
+
+      // Check if carrier is available
+      if (!carrierFactory.isCarrierAvailable(brand)) {
+        return res.status(400).json({ 
+          error: `${brand} tracking service is not available` 
+        });
+      }
+
+      // Check if tracking request already exists
+      const carrierId = await getCarrierId(brand);
+      const existingRequest = await prisma.trackingRequest.findFirst({
+        where: {
+          userId: userId,
+          trackingNumber: trackingNumber,
+          carrierId: carrierId
+        },
+        select: {
+          id: true,
+          status: true
+        }
+      });
+
+      if (existingRequest) {
+        return res.status(409).json({
+          error: 'Tracking number already exists',
+          trackingId: existingRequest.id,
+          status: existingRequest.status
+        });
+      }
+
+      // Create tracking request
+      const trackingRequest = await prisma.trackingRequest.create({
+        data: {
+          userId: userId,
+          trackingNumber: trackingNumber,
+          carrierId: carrierId,
+          status: 'pending',
+          metadata: description ? { description } : null
+        }
+      });
+
+      // Process tracking in background
+      processTrackingAsync(trackingRequest.id, trackingNumber, brand);
+
+      // Return in frontend expected format
+      res.status(201).json({
+        id: trackingRequest.id,
+        trackingNumber: trackingNumber,
+        brand: brand.toLowerCase(),
+        description: description || '',
+        dateAdded: trackingRequest.createdAt.toISOString()
+      });
+
+    } catch (error) {
+      console.error('Add tracking error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * GET /api/tracking/user
+ * Get user's tracking items (frontend compatibility endpoint)
+ */
+router.get('/user', verifyNextAuthToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const requests = await prisma.trackingRequest.findMany({
+      where: {
+        userId: userId
+      },
+      include: {
+        carrier: {
+          select: {
+            name: true,
+            displayName: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    // Transform to frontend expected format
+    const trackings = requests.map(request => ({
+      id: request.id,
+      trackingNumber: request.trackingNumber,
+      brand: request.carrier?.name?.toLowerCase() || 'unknown',
+      description: request.metadata?.description || '',
+      dateAdded: request.createdAt.toISOString()
+    }));
+
+    res.json({
+      trackings
+    });
+
+  } catch (error) {
+    console.error('Get user trackings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * PUT /api/tracking/update
+ * Update an existing tracking item (frontend compatibility endpoint)
+ */
+router.put('/update', 
+  verifyNextAuthToken,
+  [
+    body('id')
+      .isString()
+      .withMessage('ID is required'),
+    body('trackingNumber')
+      .optional()
+      .isString()
+      .isLength({ min: 8, max: 50 })
+      .withMessage('Tracking number must be between 8 and 50 characters'),
+    body('brand')
+      .optional()
+      .isString()
+      .isIn(['USPS', 'UPS', 'FedEx', 'DHL'])
+      .withMessage('Brand must be one of: USPS, UPS, FedEx, DHL'),
+    body('description')
+      .optional()
+      .isString()
+      .withMessage('Description must be a string')
+  ],
+  async (req, res) => {
+    try {
+      // Validate input
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: errors.array() 
+        });
+      }
+
+      const { id, trackingNumber, brand, description } = req.body;
+      const userId = req.user.id;
+
+      // Find the tracking request
+      const existingRequest = await prisma.trackingRequest.findFirst({
+        where: {
+          id: id,
+          userId: userId
+        },
+        include: {
+          carrier: {
+            select: {
+              name: true
+            }
+          }
+        }
+      });
+
+      if (!existingRequest) {
+        return res.status(404).json({ error: 'Tracking item not found' });
+      }
+
+      // Prepare update data
+      const updateData = {};
+      
+      if (trackingNumber) {
+        updateData.trackingNumber = trackingNumber;
+      }
+      
+      if (brand) {
+        const carrierId = await getCarrierId(brand);
+        if (!carrierId) {
+          return res.status(400).json({ error: 'Invalid brand' });
+        }
+        updateData.carrierId = carrierId;
+      }
+      
+      if (description !== undefined) {
+        updateData.metadata = { 
+          ...existingRequest.metadata, 
+          description 
+        };
+      }
+
+      // Update the tracking request
+      const updatedRequest = await prisma.trackingRequest.update({
+        where: { id: id },
+        data: updateData,
+        include: {
+          carrier: {
+            select: {
+              name: true
+            }
+          }
+        }
+      });
+
+      // Return in frontend expected format
+      res.json({
+        id: updatedRequest.id,
+        trackingNumber: updatedRequest.trackingNumber,
+        brand: updatedRequest.carrier?.name?.toLowerCase() || 'unknown',
+        description: updatedRequest.metadata?.description || '',
+        dateAdded: updatedRequest.createdAt.toISOString()
+      });
+
+    } catch (error) {
+      console.error('Update tracking error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/tracking/delete
+ * Delete a tracking item (frontend compatibility endpoint)
+ */
+router.delete('/delete', 
+  verifyNextAuthToken,
+  [
+    body('id')
+      .isString()
+      .withMessage('ID is required')
+  ],
+  async (req, res) => {
+    try {
+      // Validate input
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ 
+          error: 'Validation failed', 
+          details: errors.array() 
+        });
+      }
+
+      const { id } = req.body;
+      const userId = req.user.id;
+
+      // Find the tracking request
+      const existingRequest = await prisma.trackingRequest.findFirst({
+        where: {
+          id: id,
+          userId: userId
+        }
+      });
+
+      if (!existingRequest) {
+        return res.status(404).json({ error: 'Tracking item not found' });
+      }
+
+      // Delete the tracking request (cascade will handle shipment)
+      await prisma.trackingRequest.delete({
+        where: { id: id }
+      });
+
+      res.json({
+        success: true,
+        message: 'Tracking item deleted successfully'
+      });
+
+    } catch (error) {
+      console.error('Delete tracking error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+/**
  * GET /api/tracking/carriers
  * Get available carriers
  */

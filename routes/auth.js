@@ -1,6 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/prisma');
 const { verifyNextAuthToken } = require('../middleware/auth');
 
@@ -96,12 +97,22 @@ router.get('/google/callback', async (req, res) => {
       });
     }
 
-    // Create JWT token
-    const token = jwt.sign(
+    // Create JWT access token
+    const accessToken = jwt.sign(
       { 
         sub: user.id,
         email: user.email,
         name: user.fullName 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '1h' }
+    );
+
+    // Create refresh token
+    const refreshToken = jwt.sign(
+      { 
+        sub: user.id,
+        type: 'refresh' 
       },
       process.env.NEXTAUTH_SECRET || 'fallback-secret',
       { expiresIn: '7d' }
@@ -118,11 +129,16 @@ router.get('/google/callback', async (req, res) => {
         <script>
           // Send token to parent window and close popup
           if (window.opener) {
-            window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', token: '${token}' }, '*');
+            window.opener.postMessage({ 
+              type: 'GOOGLE_AUTH_SUCCESS', 
+              token: '${accessToken}',
+              refreshToken: '${refreshToken}',
+              expiresIn: 3600
+            }, '*');
             window.close();
           } else {
             // Fallback: redirect to main page with token
-            window.location.href = '${process.env.NEXTAUTH_URL}/?token=${token}';
+            window.location.href = '${process.env.NEXTAUTH_URL}/?token=${accessToken}';
           }
         </script>
         <p>Authentication successful! This window should close automatically.</p>
@@ -145,6 +161,7 @@ router.get('/google/callback', async (req, res) => {
 router.get('/session', verifyNextAuthToken, async (req, res) => {
   try {
     res.json({
+      success: true,
       user: {
         id: req.user.id,
         email: req.user.email,
@@ -187,18 +204,190 @@ router.get('/user', verifyNextAuthToken, async (req, res) => {
  */
 router.post('/refresh', verifyNextAuthToken, async (req, res) => {
   try {
-    // Token is already verified by middleware
+    // Create new access token
+    const accessToken = jwt.sign(
+      { 
+        sub: req.user.id,
+        email: req.user.email,
+        name: req.user.fullName 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '1h' }
+    );
+
+    // Create new refresh token
+    const refreshToken = jwt.sign(
+      { 
+        sub: req.user.id,
+        type: 'refresh' 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '7d' }
+    );
+
     res.json({ 
-      message: 'Token is valid',
+      success: true,
       user: {
         id: req.user.id,
         email: req.user.email,
-        full_name: req.user.fullName,
-        avatar_url: req.user.avatarUrl
-      }
+        name: req.user.fullName,
+        image: req.user.avatarUrl
+      },
+      accessToken,
+      refreshToken,
+      expiresIn: 3600
     });
   } catch (error) {
     console.error('Refresh error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/auth/login
+ * Login with email and password
+ */
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ 
+        error: 'Email and password are required' 
+      });
+    }
+
+    // Find user by email
+    const user = await prisma.userProfile.findUnique({
+      where: { email }
+    });
+
+    if (!user || !user.password) {
+      return res.status(401).json({ 
+        error: 'Invalid credentials' 
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    if (!isValidPassword) {
+      return res.status(401).json({ 
+        error: 'Invalid credentials' 
+      });
+    }
+
+    // Create JWT access token
+    const accessToken = jwt.sign(
+      { 
+        sub: user.id,
+        email: user.email,
+        name: user.fullName 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '1h' }
+    );
+
+    // Create refresh token
+    const refreshToken = jwt.sign(
+      { 
+        sub: user.id,
+        type: 'refresh' 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.fullName
+      },
+      accessToken,
+      refreshToken,
+      expiresIn: 3600
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/auth/register
+ * Register new user
+ */
+router.post('/register', async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+
+    if (!email || !password || !name) {
+      return res.status(400).json({ 
+        error: 'Email, password, and name are required' 
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await prisma.userProfile.findUnique({
+      where: { email }
+    });
+
+    if (existingUser) {
+      return res.status(409).json({ 
+        error: 'User already exists with this email' 
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Create user
+    const user = await prisma.userProfile.create({
+      data: {
+        id: `user_${Date.now()}`, // Generate unique ID
+        email,
+        fullName: name,
+        password: hashedPassword
+      }
+    });
+
+    // Create JWT access token
+    const accessToken = jwt.sign(
+      { 
+        sub: user.id,
+        email: user.email,
+        name: user.fullName 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '1h' }
+    );
+
+    // Create refresh token
+    const refreshToken = jwt.sign(
+      { 
+        sub: user.id,
+        type: 'refresh' 
+      },
+      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.fullName
+      },
+      accessToken,
+      refreshToken,
+      expiresIn: 3600
+    });
+
+  } catch (error) {
+    console.error('Register error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -210,7 +399,10 @@ router.post('/refresh', verifyNextAuthToken, async (req, res) => {
 router.post('/logout', verifyNextAuthToken, async (req, res) => {
   try {
     // With JWT, logout is handled client-side by removing the token
-    res.json({ message: 'Logout successful' });
+    res.json({ 
+      success: true,
+      message: 'Logout successful' 
+    });
   } catch (error) {
     console.error('Logout error:', error);
     res.status(500).json({ error: 'Internal server error' });

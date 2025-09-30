@@ -82,7 +82,15 @@ router.get('/profile', verifyNextAuthToken, async (req, res) => {
       return res.status(404).json({ error: 'User profile not found' });
     }
 
-    res.json(profile);
+    res.json({
+      success: true,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        name: profile.fullName,
+        image: profile.avatarUrl
+      }
+    });
 
   } catch (error) {
     console.error('Profile error:', error);

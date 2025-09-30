@@ -30,7 +30,8 @@
     "express-session": "^1.17.3",
     "connect-sqlite3": "^0.9.13",
     "@prisma/client": "^5.7.1",
-    "prisma": "^5.7.1"
+    "prisma": "^5.7.1",
+    "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
