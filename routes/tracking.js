@@ -3,6 +3,8 @@ const { body, validationResult } = require('express-validator');
 const { prisma } = require('../lib/prisma');
 const { verifyNextAuthToken } = require('../middleware/auth');
 const carrierFactory = require('../services/carrier/carrier-factory');
+const { getTrackingUrl } = require('../services/carrier/carrier-urls');
+const { trackingLimiter } = require('../config/rate-limit');
 
 const router = express.Router();
 
@@ -11,6 +13,7 @@ const router = express.Router();
  * Add a new tracking number for processing
  */
 router.post('/track', 
+  trackingLimiter,
   verifyNextAuthToken,
   [
     body('trackingNumber')
@@ -145,35 +148,37 @@ router.get('/requests/:id', verifyNextAuthToken, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
-    // Get tracking request
-    const { data: request, error: requestError } = await supabase
-      .from('tracking_requests')
-      .select(`
-        id,
-        tracking_number,
-        status,
-        created_at,
-        updated_at,
-        carriers (name, display_name)
-      `)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
+    // Get tracking request with carrier and shipment data
+    const request = await prisma.trackingRequest.findFirst({
+      where: {
+        id: id,
+        userId: userId
+      },
+      include: {
+        carrier: {
+          select: {
+            name: true,
+            displayName: true
+          }
+        },
+        shipment: true
+      }
+    });
 
-    if (requestError || !request) {
+    if (!request) {
       return res.status(404).json({ error: 'Tracking request not found' });
     }
 
-    // Get shipment data
-    const { data: shipment, error: shipmentError } = await supabase
-      .from('shipments')
-      .select('*')
-      .eq('tracking_request_id', id)
-      .single();
-
     res.json({
-      request,
-      shipment: shipment || null
+      request: {
+        id: request.id,
+        tracking_number: request.trackingNumber,
+        status: request.status,
+        created_at: request.createdAt,
+        updated_at: request.updatedAt,
+        carrier: request.carrier
+      },
+      shipment: request.shipment || null
     });
 
   } catch (error) {
@@ -183,10 +188,106 @@ router.get('/requests/:id', verifyNextAuthToken, async (req, res) => {
 });
 
 /**
+ * GET /api/tracking/:id/url
+ * Get tracking URL for a specific tracking request
+ * Opens carrier's tracking page
+ */
+router.get('/:id/url', verifyNextAuthToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Get tracking request
+    const request = await prisma.trackingRequest.findFirst({
+      where: {
+        id: id,
+        userId: userId
+      },
+      include: {
+        carrier: {
+          select: {
+            name: true,
+            displayName: true
+          }
+        }
+      }
+    });
+
+    if (!request) {
+      return res.status(404).json({ 
+        error: 'Tracking request not found' 
+      });
+    }
+
+    // Generate tracking URL
+    const trackingUrl = getTrackingUrl(
+      request.carrier.name,
+      request.trackingNumber
+    );
+
+    if (!trackingUrl) {
+      return res.status(400).json({ 
+        error: `Tracking URL not available for carrier: ${request.carrier.name}` 
+      });
+    }
+
+    res.json({
+      url: trackingUrl,
+      trackingNumber: request.trackingNumber,
+      carrier: request.carrier.name,
+      carrierDisplayName: request.carrier.displayName
+    });
+
+  } catch (error) {
+    console.error('Get tracking URL error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Detect carrier from tracking number pattern
+ */
+function detectCarrierFromTrackingNumber(trackingNumber) {
+  const patterns = {
+    'UPS': [
+      /^1Z[0-9A-Z]{16}$/,           // 1Z followed by 16 alphanumeric (no spaces)
+      /^1Z\s[0-9A-Z\s]+$/,          // 1Z followed by alphanumeric with spaces
+      /^[0-9]{10,}$/                 // 10+ digits
+    ],
+    'FedEx': [
+      /^[0-9]{12}$/,                 // 12 digits
+      /^[0-9]{14}$/                  // 14 digits
+    ],
+    'USPS': [
+      /^[A-Z]{2}[0-9]{9}[A-Z]{2}$/,  // 2 letters, 9 digits, 2 letters
+      /^[0-9]{4}\s[0-9]{4}\s[0-9]{4}\s[0-9]{4}$/  // 4 groups of 4 digits
+    ],
+    'DHL': [
+      /^[0-9]{10,11}$/               // 10-11 digits
+    ],
+    'Amazon': [
+      /^TBA[0-9]{10}$/               // TBA followed by 10 digits
+    ]
+  };
+
+  for (const [carrier, carrierPatterns] of Object.entries(patterns)) {
+    for (const pattern of carrierPatterns) {
+      if (pattern.test(trackingNumber)) {
+        return carrier;
+      }
+    }
+  }
+  
+  return null; // Unknown pattern
+}
+
+/**
  * POST /api/tracking/add
  * Add a new tracking item (frontend compatibility endpoint)
+ * Now supports automatic carrier detection
  */
 router.post('/add', 
+  trackingLimiter,
   verifyNextAuthToken,
   [
     body('trackingNumber')
@@ -194,9 +295,11 @@ router.post('/add',
       .isLength({ min: 8, max: 50 })
       .withMessage('Tracking number must be between 8 and 50 characters'),
     body('brand')
+      .optional()
       .isString()
-      .isIn(['USPS', 'UPS', 'FedEx', 'DHL'])
-      .withMessage('Brand must be one of: USPS, UPS, FedEx, DHL'),
+      .customSanitizer(value => value ? value.toUpperCase() : value) // Convert to uppercase
+      .isIn(['USPS', 'UPS', 'FEDEX', 'DHL', 'AMAZON', 'OTHER'])
+      .withMessage('Brand must be one of: USPS, UPS, FedEx, DHL, Amazon, other'),
     body('description')
       .optional()
       .isString()
@@ -204,9 +307,14 @@ router.post('/add',
   ],
   async (req, res) => {
     try {
+      console.log('=== POST /api/tracking/add received ===');
+      console.log('Request body:', req.body);
+      console.log('User ID:', req.user?.id);
+      
       // Validate input
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
+        console.log('Validation errors:', errors.array());
         return res.status(400).json({ 
           error: 'Validation failed', 
           details: errors.array() 
@@ -215,16 +323,63 @@ router.post('/add',
 
       const { trackingNumber, brand, description } = req.body;
       const userId = req.user.id;
+      
+      console.log('Processing tracking:', { trackingNumber, brand, description, userId });
 
-      // Check if carrier is available
-      if (!carrierFactory.isCarrierAvailable(brand)) {
-        return res.status(400).json({ 
-          error: `${brand} tracking service is not available` 
-        });
+      // Auto-detect carrier if not provided or if brand is "other"
+      let detectedBrand = brand;
+      if (!brand || brand === 'OTHER') {
+        console.log('No brand provided or brand is "OTHER", attempting auto-detection...');
+        detectedBrand = detectCarrierFromTrackingNumber(trackingNumber);
+        console.log('Detected brand:', detectedBrand);
+        
+        if (!detectedBrand) {
+          return res.status(400).json({ 
+            error: 'Unable to detect carrier from tracking number. Please specify the carrier manually.',
+            trackingNumber: trackingNumber
+          });
+        }
+      }
+      
+      // Normalize brand name for database lookup
+      // Database uses uppercase for most, but "FedEx" is stored as "FedEx"
+      if (detectedBrand === 'FEDEX') {
+        detectedBrand = 'FedEx';
+      } else if (detectedBrand === 'AMAZON') {
+        detectedBrand = 'Amazon';
+      }
+
+      // Check if carrier is available (skip for now - only USPS is implemented)
+      console.log('Checking carrier availability for:', detectedBrand);
+      const isCarrierServiceAvailable = carrierFactory.isCarrierAvailable(detectedBrand);
+      console.log('Carrier service available:', isCarrierServiceAvailable);
+      
+      // Allow adding tracking even if carrier service is not implemented yet
+      // The tracking will be stored with status 'pending' until carrier is implemented
+      if (!isCarrierServiceAvailable) {
+        console.log(`${detectedBrand} service not implemented yet, storing tracking request without processing`);
       }
 
       // Check if tracking request already exists
-      const carrierId = await getCarrierId(brand);
+      console.log('Getting carrier ID for:', detectedBrand);
+      const carrierId = await getCarrierId(detectedBrand);
+      console.log('Carrier ID:', carrierId);
+      
+      if (!carrierId) {
+        console.log('Carrier ID not found for brand:', detectedBrand);
+        console.log('Available carriers in database:');
+        const allCarriers = await prisma.carrier.findMany({
+          select: { id: true, name: true, displayName: true }
+        });
+        console.log(allCarriers);
+        
+        return res.status(400).json({ 
+          error: `Carrier ${detectedBrand} not found in database`,
+          availableCarriers: allCarriers.map(c => c.name),
+          suggestion: 'Please run: npm run db:seed'
+        });
+      }
+      
       const existingRequest = await prisma.trackingRequest.findFirst({
         where: {
           userId: userId,
@@ -246,6 +401,10 @@ router.post('/add',
       }
 
       // Create tracking request
+      console.log('Creating tracking request with data:', {
+        userId, trackingNumber, carrierId, description
+      });
+      
       const trackingRequest = await prisma.trackingRequest.create({
         data: {
           userId: userId,
@@ -255,18 +414,28 @@ router.post('/add',
           metadata: description ? { description } : null
         }
       });
+      
+      console.log('Tracking request created:', trackingRequest.id);
 
-      // Process tracking in background
-      processTrackingAsync(trackingRequest.id, trackingNumber, brand);
+      // Process tracking in background only if carrier service is available
+      if (isCarrierServiceAvailable) {
+        console.log('Starting background processing for:', trackingRequest.id);
+        processTrackingAsync(trackingRequest.id, trackingNumber, detectedBrand);
+      } else {
+        console.log('Skipping background processing - carrier service not implemented yet');
+      }
 
       // Return in frontend expected format
-      res.status(201).json({
+      const response = {
         id: trackingRequest.id,
         trackingNumber: trackingNumber,
-        brand: brand.toLowerCase(),
+        brand: detectedBrand.toLowerCase(),
         description: description || '',
         dateAdded: trackingRequest.createdAt.toISOString()
-      });
+      };
+      
+      console.log('Sending response:', response);
+      res.status(201).json(response);
 
     } catch (error) {
       console.error('Add tracking error:', error);
@@ -306,6 +475,7 @@ router.get('/user', verifyNextAuthToken, async (req, res) => {
       trackingNumber: request.trackingNumber,
       brand: request.carrier?.name?.toLowerCase() || 'unknown',
       description: request.metadata?.description || '',
+      status: request.status || 'pending',
       dateAdded: request.createdAt.toISOString()
     }));
 
@@ -481,6 +651,97 @@ router.delete('/delete',
     }
   }
 );
+
+/**
+ * GET /api/tracking/debug
+ * Debug endpoint to check database status
+ */
+router.get('/debug', verifyNextAuthToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get user's tracking requests
+    const trackingRequests = await prisma.trackingRequest.findMany({
+      where: { userId },
+      include: {
+        carrier: {
+          select: {
+            name: true,
+            displayName: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
+    
+    // Get carriers
+    const carriers = await prisma.carrier.findMany({
+      select: {
+        id: true,
+        name: true,
+        displayName: true
+      }
+    });
+    
+    res.json({
+      userId,
+      trackingRequests,
+      carriers,
+      totalRequests: trackingRequests.length
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
+  }
+});
+
+/**
+ * POST /api/tracking/seed
+ * Seed the database with carriers (development only)
+ */
+router.post('/seed', async (req, res) => {
+  try {
+    console.log('🌱 Seeding database with carriers...');
+    
+    const carriers = [
+      { name: 'USPS', displayName: 'United States Postal Service' },
+      { name: 'UPS', displayName: 'United Parcel Service' },
+      { name: 'FedEx', displayName: 'FedEx Corporation' },
+      { name: 'DHL', displayName: 'DHL International' },
+      { name: 'Amazon', displayName: 'Amazon Logistics' }
+    ];
+    
+    const createdCarriers = [];
+    
+    for (const carrier of carriers) {
+      const existing = await prisma.carrier.findUnique({
+        where: { name: carrier.name }
+      });
+      
+      if (!existing) {
+        const newCarrier = await prisma.carrier.create({
+          data: carrier
+        });
+        createdCarriers.push(newCarrier);
+        console.log(`✅ Created carrier: ${carrier.displayName}`);
+      } else {
+        console.log(`⏭️  Carrier already exists: ${carrier.displayName}`);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: 'Database seeded successfully',
+      createdCarriers: createdCarriers.length,
+      totalCarriers: carriers.length
+    });
+    
+  } catch (error) {
+    console.error('Seed error:', error);
+    res.status(500).json({ error: 'Failed to seed database', details: error.message });
+  }
+});
 
 /**
  * GET /api/tracking/carriers

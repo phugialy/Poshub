@@ -137,35 +137,41 @@ router.get('/shipments', verifyNextAuthToken, async (req, res) => {
     const userId = req.user.id;
     const { page = 1, limit = 20, status } = req.query;
 
-    const offset = (page - 1) * limit;
+    const offset = (page - 1) * parseInt(limit);
 
-    let query = supabase
-      .from('shipments')
-      .select(`
-        *,
-        tracking_requests!inner (
-          id,
-          tracking_number,
-          status,
-          created_at,
-          carriers (name, display_name)
-        )
-      `)
-      .eq('tracking_requests.user_id', userId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    // Build where clause
+    const whereClause = {
+      trackingRequest: {
+        userId: userId
+      }
+    };
 
     // Filter by status if provided
     if (status) {
-      query = query.eq('tracking_requests.status', status);
+      whereClause.trackingRequest.status = status;
     }
 
-    const { data: shipments, error } = await query;
-
-    if (error) {
-      console.error('Error fetching shipments:', error);
-      return res.status(500).json({ error: 'Failed to fetch shipments' });
-    }
+    // Fetch shipments with tracking request and carrier data
+    const shipments = await prisma.shipment.findMany({
+      where: whereClause,
+      include: {
+        trackingRequest: {
+          include: {
+            carrier: {
+              select: {
+                name: true,
+                displayName: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      skip: offset,
+      take: parseInt(limit)
+    });
 
     res.json({
       shipments,

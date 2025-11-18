@@ -3,8 +3,12 @@ const { body, validationResult } = require('express-validator');
 const { prisma } = require('../lib/prisma');
 const { verifyGoogleToken } = require('../middleware/external-auth');
 const carrierFactory = require('../services/carrier/carrier-factory');
+const { externalApiLimiter } = require('../config/rate-limit');
 
 const router = express.Router();
+
+// Apply external API rate limiter to all routes in this router
+router.use(externalApiLimiter);
 
 /**
  * POST /api/external/track

@@ -1,11 +1,10 @@
-// NextAuth.js configuration
-const NEXTAUTH_URL = window.location.origin;
-
-// API base URL
+// Modern PostalHub App - SaaS Edition
 const API_BASE_URL = window.location.origin;
 
 // Global state
 let currentUser = null;
+let allTrackings = [];
+let filteredTrackings = [];
 
 // DOM elements
 const loginSection = document.getElementById('login-section');
@@ -18,6 +17,11 @@ const logoutBtn = document.getElementById('logout-btn');
 const trackingForm = document.getElementById('tracking-form');
 const trackingList = document.getElementById('tracking-list');
 const loadingOverlay = document.getElementById('loading-overlay');
+const searchInput = document.getElementById('search-input');
+const filterStatus = document.getElementById('filter-status');
+const filterCarrier = document.getElementById('filter-carrier');
+const userMenu = document.getElementById('user-menu');
+const userAvatar = document.getElementById('user-avatar');
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
@@ -30,7 +34,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 function setupPopupMessageListener() {
     window.addEventListener('message', (event) => {
         if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
-            // Store token and reload to update auth state
             localStorage.setItem('auth_token', event.data.token);
             window.location.reload();
         }
@@ -40,28 +43,24 @@ function setupPopupMessageListener() {
 // Check authentication status
 async function checkAuth() {
     try {
-        // Check for token in URL (from OAuth callback)
         const urlParams = new URLSearchParams(window.location.search);
         const token = urlParams.get('token');
         
         if (token) {
             localStorage.setItem('auth_token', token);
-            // Remove token from URL
             window.history.replaceState({}, document.title, window.location.pathname);
         }
 
         const storedToken = localStorage.getItem('auth_token');
         
         if (storedToken) {
-            // Verify token with server
-            const response = await fetch(`${NEXTAUTH_URL}/api/auth/session`, {
+            const response = await fetch(`${API_BASE_URL}/api/auth/session`, {
                 headers: {
                     'Authorization': `Bearer ${storedToken}`
                 }
             });
             
             if (response.ok) {
-                // Check if response is JSON
                 const contentType = response.headers.get('content-type');
                 if (contentType && contentType.includes('application/json')) {
                     const session = await response.json();
@@ -69,7 +68,6 @@ async function checkAuth() {
                     showDashboard();
                     await loadDashboardData();
                 } else {
-                    console.error('Non-JSON response from session endpoint');
                     localStorage.removeItem('auth_token');
                     showLogin();
                 }
@@ -88,51 +86,56 @@ async function checkAuth() {
 
 // Setup event listeners
 function setupEventListeners() {
-    // Login buttons - use popup method
     loginBtn?.addEventListener('click', signInWithGooglePopup);
     loginContentBtn?.addEventListener('click', signInWithGooglePopup);
-    
-    // Logout button
     logoutBtn?.addEventListener('click', signOut);
-    
-    // Tracking form
     trackingForm?.addEventListener('submit', handleTrackingSubmit);
+    
+    // Search and filters
+    searchInput?.addEventListener('input', applyFilters);
+    filterStatus?.addEventListener('change', applyFilters);
+    filterCarrier?.addEventListener('change', applyFilters);
+    
+    // User menu dropdown
+    userAvatar?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        userMenu?.classList.toggle('hidden');
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.dropdown')) {
+            userMenu?.classList.add('hidden');
+        }
+    });
 }
 
 // Show login interface
 function showLogin() {
-    loginSection.classList.remove('hidden');
-    userSection.classList.add('hidden');
-    loginContent.classList.remove('hidden');
-    dashboardContent.classList.add('hidden');
+    loginSection?.classList.add('hidden');
+    userSection?.classList.add('hidden');
+    loginContent?.classList.remove('hidden');
+    dashboardContent?.classList.add('hidden');
 }
 
 // Show dashboard interface
 function showDashboard() {
     if (!currentUser) return;
     
-    loginSection.classList.add('hidden');
-    userSection.classList.remove('hidden');
-    loginContent.classList.add('hidden');
-    dashboardContent.classList.remove('hidden');
+    loginSection?.classList.add('hidden');
+    userSection?.classList.remove('hidden');
+    loginContent?.classList.add('hidden');
+    dashboardContent?.classList.remove('hidden');
     
     // Update user info
-    document.getElementById('user-name').textContent = currentUser.name || 'User';
-    document.getElementById('user-email').textContent = currentUser.email || '';
-    document.getElementById('user-avatar').src = currentUser.image || 'https://via.placeholder.com/40';
-}
-
-// Sign in with Google (Redirect method)
-async function signInWithGoogle() {
-    try {
-        showLoading(true);
-        // Redirect to our custom Google OAuth
-        window.location.href = `${NEXTAUTH_URL}/api/auth/google`;
-    } catch (error) {
-        console.error('Sign in error:', error);
-        alert('Failed to sign in. Please try again.');
-        showLoading(false);
-    }
+    const userNameEl = document.getElementById('user-name');
+    const userEmailEl = document.getElementById('user-email');
+    const welcomeNameEl = document.getElementById('welcome-name');
+    
+    if (userNameEl) userNameEl.textContent = currentUser.name || 'User';
+    if (userEmailEl) userEmailEl.textContent = currentUser.email || '';
+    if (welcomeNameEl) welcomeNameEl.textContent = currentUser.name?.split(' ')[0] || 'there';
+    if (userAvatar) userAvatar.src = currentUser.image || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.name || 'User');
 }
 
 // Sign in with Google (Popup method)
@@ -140,51 +143,39 @@ async function signInWithGooglePopup() {
     try {
         showLoading(true);
         
-        // Get the OAuth URL from server
-        const response = await fetch(`${NEXTAUTH_URL}/api/auth/google-url`);
+        const response = await fetch(`${API_BASE_URL}/api/auth/google-url`);
         
-        // Check if response is successful
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Server error:', response.status, errorText);
-            throw new Error(`Server error: ${response.status} - ${errorText}`);
+            throw new Error(`Server error: ${response.status}`);
         }
         
-        // Check if response is JSON
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-            const responseText = await response.text();
-            console.error('Non-JSON response:', responseText);
             throw new Error('Server returned non-JSON response');
         }
         
         const data = await response.json();
         
-        // Validate response data
         if (!data || !data.authUrl) {
-            console.error('Invalid response data:', data);
             throw new Error('Invalid response from server');
         }
         
-        // Open popup window
         const popup = window.open(
             data.authUrl,
             'google-auth',
             'width=500,height=600,scrollbars=yes,resizable=yes,top=100,left=100'
         );
         
-        // Listen for popup completion
         const checkClosed = setInterval(() => {
             if (popup.closed) {
                 clearInterval(checkClosed);
                 showLoading(false);
-                // The popup message listener will handle token storage and reload
             }
         }, 1000);
         
     } catch (error) {
         console.error('Sign in error:', error);
-        alert('Failed to sign in. Please try again.');
+        showToast('Failed to sign in. Please try again.', 'error');
         showLoading(false);
     }
 }
@@ -193,12 +184,11 @@ async function signInWithGooglePopup() {
 async function signOut() {
     try {
         showLoading(true);
-        // Clear token and reload page
         localStorage.removeItem('auth_token');
         window.location.href = '/';
     } catch (error) {
         console.error('Sign out error:', error);
-        alert('Failed to sign out. Please try again.');
+        showToast('Failed to sign out. Please try again.', 'error');
         showLoading(false);
     }
 }
@@ -210,19 +200,18 @@ async function handleTrackingSubmit(e) {
     const formData = new FormData(e.target);
     const trackingData = {
         trackingNumber: formData.get('trackingNumber'),
-        carrier: formData.get('carrier')
+        brand: formData.get('carrier') || undefined
     };
     
     try {
         showLoading(true);
         
         const token = localStorage.getItem('auth_token');
-        
         if (!token) {
             throw new Error('Not authenticated');
         }
 
-        const response = await fetch(`${API_BASE_URL}/api/tracking/track`, {
+        const response = await fetch(`${API_BASE_URL}/api/tracking/add`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -231,11 +220,8 @@ async function handleTrackingSubmit(e) {
             body: JSON.stringify(trackingData)
         });
         
-        // Check if response is JSON
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-            const responseText = await response.text();
-            console.error('Non-JSON response:', responseText);
             throw new Error('Server returned non-JSON response');
         }
         
@@ -245,18 +231,13 @@ async function handleTrackingSubmit(e) {
             throw new Error(result.error || 'Failed to add tracking');
         }
         
-        // Reset form
         e.target.reset();
-        
-        // Reload dashboard data
         await loadDashboardData();
-        
-        // Show success message
-        showNotification('Tracking added successfully!', 'success');
+        showToast('Tracking added successfully!', 'success');
         
     } catch (error) {
         console.error('Tracking submission error:', error);
-        showNotification(error.message || 'Failed to add tracking', 'error');
+        showToast(error.message || 'Failed to add tracking', 'error');
     } finally {
         showLoading(false);
     }
@@ -266,50 +247,32 @@ async function handleTrackingSubmit(e) {
 async function loadDashboardData() {
     try {
         const token = localStorage.getItem('auth_token');
+        if (!token) return;
         
-        if (!token) {
-            console.error('No token found');
-            return;
-        }
-        
-        // Load dashboard stats and tracking data
         const [dashboardResponse, requestsResponse] = await Promise.all([
             fetch(`${API_BASE_URL}/api/user/dashboard`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             }),
-            fetch(`${API_BASE_URL}/api/tracking/requests`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+            fetch(`${API_BASE_URL}/api/tracking/user`, {
+                headers: { 'Authorization': `Bearer ${token}` }
             })
         ]);
         
         if (dashboardResponse.ok) {
-            // Check if response is JSON
-            const dashboardContentType = dashboardResponse.headers.get('content-type');
-            if (dashboardContentType && dashboardContentType.includes('application/json')) {
+            const contentType = dashboardResponse.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
                 const dashboardData = await dashboardResponse.json();
-                updateDashboardStats(dashboardData.stats);
-            } else {
-                console.error('Non-JSON response from dashboard endpoint');
+                updateDashboardStats(dashboardData.stats || {});
             }
-        } else {
-            console.error('Dashboard response error:', dashboardResponse.status);
         }
         
         if (requestsResponse.ok) {
-            // Check if response is JSON
-            const requestsContentType = requestsResponse.headers.get('content-type');
-            if (requestsContentType && requestsContentType.includes('application/json')) {
+            const contentType = requestsResponse.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
                 const requestsData = await requestsResponse.json();
-                updateTrackingList(requestsData.requests);
-            } else {
-                console.error('Non-JSON response from requests endpoint');
+                allTrackings = requestsData.trackings || [];
+                applyFilters();
             }
-        } else {
-            console.error('Requests response error:', requestsResponse.status);
         }
         
     } catch (error) {
@@ -319,67 +282,119 @@ async function loadDashboardData() {
 
 // Update dashboard statistics
 function updateDashboardStats(stats) {
-    document.getElementById('stat-total').textContent = stats.total || 0;
-    document.getElementById('stat-pending').textContent = stats.pending || 0;
-    document.getElementById('stat-processing').textContent = stats.processing || 0;
-    document.getElementById('stat-completed').textContent = stats.completed || 0;
+    const totalEl = document.getElementById('stat-total');
+    const pendingEl = document.getElementById('stat-pending');
+    const processingEl = document.getElementById('stat-processing');
+    const completedEl = document.getElementById('stat-completed');
+    
+    if (totalEl) totalEl.textContent = stats.total || 0;
+    if (pendingEl) pendingEl.textContent = stats.pending || 0;
+    if (processingEl) processingEl.textContent = stats.processing || 0;
+    if (completedEl) completedEl.textContent = stats.completed || 0;
+}
+
+// Apply search and filters
+function applyFilters() {
+    const searchTerm = searchInput?.value.toLowerCase() || '';
+    const statusFilter = filterStatus?.value || '';
+    const carrierFilter = filterCarrier?.value || '';
+    
+    filteredTrackings = allTrackings.filter(tracking => {
+        const matchesSearch = !searchTerm || 
+            tracking.trackingNumber.toLowerCase().includes(searchTerm) ||
+            tracking.brand.toLowerCase().includes(searchTerm);
+        
+        const matchesStatus = !statusFilter || tracking.status === statusFilter;
+        const matchesCarrier = !carrierFilter || tracking.brand.toLowerCase() === carrierFilter.toLowerCase();
+        
+        return matchesSearch && matchesStatus && matchesCarrier;
+    });
+    
+    updateTrackingList(filteredTrackings);
+    
+    // Update count
+    const countEl = document.getElementById('tracking-count');
+    if (countEl) {
+        const count = filteredTrackings.length;
+        countEl.textContent = `${count} package${count !== 1 ? 's' : ''}`;
+    }
 }
 
 // Update tracking list
-function updateTrackingList(requests) {
-    if (!requests || requests.length === 0) {
+function updateTrackingList(trackings) {
+    if (!trackingList) return;
+    
+    if (!trackings || trackings.length === 0) {
         trackingList.innerHTML = `
-            <div class="text-center text-gray-500 py-8">
-                <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
-                </svg>
-                <p>No packages tracked yet. Add your first tracking number above!</p>
+            <div class="empty-state">
+                <div class="empty-state-icon">
+                    <i class="fas fa-box-open text-6xl"></i>
+                </div>
+                <h3 class="text-lg font-semibold text-gray-700 mb-2">No packages found</h3>
+                <p class="text-gray-500">${allTrackings.length === 0 ? 'Add your first tracking number to get started!' : 'Try adjusting your search or filters.'}</p>
             </div>
         `;
         return;
     }
     
-    const listHTML = requests.map(request => {
-        const statusClass = getStatusClass(request.status);
-        const carrierName = request.carriers?.display_name || request.carriers?.name || 'Unknown';
-        const shipment = request.shipments?.[0];
+    const listHTML = trackings.map((tracking, index) => {
+        const statusClass = getStatusClass(tracking.status);
+        const carrierName = getCarrierDisplayName(tracking.brand);
+        const carrierIcon = getCarrierIcon(tracking.brand);
+        const dateAdded = new Date(tracking.dateAdded).toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric', 
+            year: 'numeric' 
+        });
         
         return `
-            <div class="border border-gray-200 rounded-lg p-4 mb-4 hover:shadow-md transition-shadow">
-                <div class="flex justify-between items-start mb-2">
-                    <div>
-                        <h3 class="font-medium text-gray-900">${request.tracking_number}</h3>
-                        <p class="text-sm text-gray-600">${carrierName}</p>
-                    </div>
-                    <span class="px-2 py-1 rounded-full text-xs font-medium ${statusClass}">
-                        ${request.status}
-                    </span>
-                </div>
-                ${shipment ? `
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                        <div>
-                            <span class="text-gray-500">Status:</span>
-                            <p class="font-medium">${shipment.current_status || 'Unknown'}</p>
+            <div class="tracking-card fade-in" style="animation-delay: ${index * 0.05}s">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div class="flex-1">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="w-12 h-12 rounded-lg ${getCarrierColor(tracking.brand)} flex items-center justify-center">
+                                <i class="${carrierIcon} text-white text-lg"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <h3 class="font-semibold text-gray-900 font-mono text-sm">${tracking.trackingNumber}</h3>
+                                    <span class="badge ${statusClass}">${formatStatus(tracking.status)}</span>
+                                </div>
+                                <p class="text-sm text-gray-600">
+                                    <i class="fas fa-truck mr-1"></i>
+                                    ${carrierName}
+                                </p>
+                            </div>
                         </div>
-                        <div>
-                            <span class="text-gray-500">Location:</span>
-                            <p class="font-medium">${shipment.current_location || 'Unknown'}</p>
-                        </div>
-                        <div>
-                            <span class="text-gray-500">Expected Delivery:</span>
-                            <p class="font-medium">${shipment.expected_delivery_date || 'Not available'}</p>
-                        </div>
+                        ${tracking.description ? `
+                            <p class="text-sm text-gray-600 mb-2">
+                                <i class="fas fa-tag mr-1"></i>
+                                ${tracking.description}
+                            </p>
+                        ` : ''}
+                        <p class="text-xs text-gray-400">
+                            <i class="far fa-calendar mr-1"></i>
+                            Added ${dateAdded}
+                        </p>
                     </div>
-                ` : `
-                    <div class="text-sm text-gray-500">
-                        ${request.status === 'pending' ? 'Waiting to process...' : 
-                          request.status === 'processing' ? 'Processing tracking data...' :
-                          request.status === 'failed' ? 'Failed to retrieve tracking data' : 
-                          'No shipment data available'}
+                    <div class="flex items-center gap-2">
+                        <button onclick="viewTrackingUrl('${tracking.id}')" 
+                                class="btn btn-secondary btn-sm" 
+                                title="View on carrier website">
+                            <i class="fas fa-external-link-alt"></i>
+                            <span class="hidden md:inline">View</span>
+                        </button>
+                        <button onclick="editTracking('${tracking.id}')" 
+                                class="btn btn-ghost btn-sm" 
+                                title="Edit tracking">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button onclick="deleteTracking('${tracking.id}')" 
+                                class="btn btn-ghost btn-sm text-red-600 hover:text-red-700" 
+                                title="Delete tracking">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </div>
-                `}
-                <div class="text-xs text-gray-400 mt-2">
-                    Added: ${new Date(request.created_at).toLocaleDateString()}
                 </div>
             </div>
         `;
@@ -388,41 +403,206 @@ function updateTrackingList(requests) {
     trackingList.innerHTML = listHTML;
 }
 
-// Get status CSS class
-function getStatusClass(status) {
-    switch (status) {
-        case 'pending': return 'status-pending';
-        case 'processing': return 'status-processing';
-        case 'completed': return 'status-completed';
-        case 'failed': return 'status-failed';
-        default: return 'bg-gray-100 text-gray-800';
+// View tracking URL (opens carrier tracking page)
+async function viewTrackingUrl(trackingId) {
+    try {
+        showLoading(true);
+        const token = localStorage.getItem('auth_token');
+        
+        const response = await fetch(`${API_BASE_URL}/api/tracking/${trackingId}/url`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to get tracking URL');
+        }
+        
+        const data = await response.json();
+        
+        if (data.url) {
+            // Open in new window/popup
+            const popup = window.open(
+                data.url,
+                'tracking',
+                'width=900,height=700,scrollbars=yes,resizable=yes'
+            );
+            
+            if (!popup) {
+                // Fallback if popup blocked
+                window.open(data.url, '_blank');
+            }
+            
+            showToast(`Opening ${data.carrierDisplayName || data.carrier} tracking page...`, 'info');
+        }
+    } catch (error) {
+        console.error('View tracking URL error:', error);
+        showToast('Failed to open tracking page', 'error');
+    } finally {
+        showLoading(false);
     }
+}
+
+// Edit tracking
+async function editTracking(trackingId) {
+    const tracking = allTrackings.find(t => t.id === trackingId);
+    if (!tracking) return;
+    
+    // Simple prompt for now - can be enhanced with modal
+    const newDescription = prompt('Edit description (optional):', tracking.description || '');
+    if (newDescription === null) return; // User cancelled
+    
+    try {
+        showLoading(true);
+        const token = localStorage.getItem('auth_token');
+        
+        const response = await fetch(`${API_BASE_URL}/api/tracking/update`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                id: trackingId,
+                description: newDescription
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to update tracking');
+        }
+        
+        await loadDashboardData();
+        showToast('Tracking updated successfully!', 'success');
+    } catch (error) {
+        console.error('Edit tracking error:', error);
+        showToast('Failed to update tracking', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Delete tracking
+async function deleteTracking(trackingId) {
+    if (!confirm('Are you sure you want to delete this tracking?')) {
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        const token = localStorage.getItem('auth_token');
+        
+        const response = await fetch(`${API_BASE_URL}/api/tracking/delete`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ id: trackingId })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete tracking');
+        }
+        
+        await loadDashboardData();
+        showToast('Tracking deleted successfully', 'success');
+    } catch (error) {
+        console.error('Delete tracking error:', error);
+        showToast('Failed to delete tracking', 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Helper functions
+function getStatusClass(status) {
+    const statusMap = {
+        'pending': 'badge-pending',
+        'processing': 'badge-processing',
+        'completed': 'badge-completed',
+        'failed': 'badge-failed'
+    };
+    return statusMap[status] || 'badge-pending';
+}
+
+function formatStatus(status) {
+    const statusMap = {
+        'pending': 'Pending',
+        'processing': 'In Transit',
+        'completed': 'Delivered',
+        'failed': 'Failed'
+    };
+    return statusMap[status] || status;
+}
+
+function getCarrierDisplayName(brand) {
+    const carriers = {
+        'usps': 'USPS',
+        'ups': 'UPS',
+        'fedex': 'FedEx',
+        'dhl': 'DHL',
+        'amazon': 'Amazon'
+    };
+    return carriers[brand?.toLowerCase()] || brand || 'Unknown';
+}
+
+function getCarrierIcon(brand) {
+    const icons = {
+        'usps': 'fas fa-mail-bulk',
+        'ups': 'fas fa-truck',
+        'fedex': 'fas fa-shipping-fast',
+        'dhl': 'fas fa-globe',
+        'amazon': 'fab fa-amazon'
+    };
+    return icons[brand?.toLowerCase()] || 'fas fa-box';
+}
+
+function getCarrierColor(brand) {
+    const colors = {
+        'usps': 'bg-blue-600',
+        'ups': 'bg-yellow-600',
+        'fedex': 'bg-purple-600',
+        'dhl': 'bg-red-600',
+        'amazon': 'bg-orange-600'
+    };
+    return colors[brand?.toLowerCase()] || 'bg-gray-600';
 }
 
 // Show loading overlay
 function showLoading(show) {
     if (show) {
-        loadingOverlay.classList.remove('hidden');
+        loadingOverlay?.classList.remove('hidden');
     } else {
-        loadingOverlay.classList.add('hidden');
+        loadingOverlay?.classList.add('hidden');
     }
 }
 
-// Show notification
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 ${
-        type === 'success' ? 'bg-green-500 text-white' :
-        type === 'error' ? 'bg-red-500 text-white' :
-        'bg-blue-500 text-white'
-    }`;
-    notification.textContent = message;
+// Show toast notification
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
     
-    document.body.appendChild(notification);
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
     
-    // Remove after 3 seconds
+    const icon = type === 'success' ? 'fa-check-circle' : 
+                 type === 'error' ? 'fa-exclamation-circle' : 
+                 'fa-info-circle';
+    
+    toast.innerHTML = `
+        <i class="fas ${icon}"></i>
+        <span>${message}</span>
+    `;
+    
+    container.appendChild(toast);
+    
     setTimeout(() => {
-        notification.remove();
+        toast.style.animation = 'slideIn 0.3s ease-out reverse';
+        setTimeout(() => toast.remove(), 300);
     }, 3000);
 }
+
+// Make functions globally available for onclick handlers
+window.viewTrackingUrl = viewTrackingUrl;
+window.editTracking = editTracking;
+window.deleteTracking = deleteTracking;

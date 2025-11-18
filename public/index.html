@@ -3,43 +3,431 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PostalHub - Package Tracking Dashboard</title>
+    <title>PostalHub - Package Tracking Made Simple</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .card-shadow { box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .status-pending { @apply bg-yellow-100 text-yellow-800; }
-        .status-processing { @apply bg-blue-100 text-blue-800; }
-        .status-completed { @apply bg-green-100 text-green-800; }
-        .status-failed { @apply bg-red-100 text-red-800; }
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #818cf8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--gray-900);
+        }
+
+        /* Modern Card Styles */
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            transition: all 0.2s ease;
+        }
+
+        .card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .card-elevated {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        /* Modern Button Styles */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border: none;
+            outline: none;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--gray-100);
+            color: var(--gray-700);
+        }
+
+        .btn-secondary:hover {
+            background: var(--gray-200);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--gray-600);
+        }
+
+        .btn-ghost:hover {
+            background: var(--gray-100);
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* Input Styles */
+        .input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            background: white;
+        }
+
+        .input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+        }
+
+        /* Status Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-processing {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .badge-completed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-failed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(-100%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .slide-in {
+            animation: slideIn 0.3s ease-out;
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .toast-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .toast-error {
+            background: var(--danger);
+            color: white;
+        }
+
+        .toast-info {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border: 2px solid var(--gray-200);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Modern Header */
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--gray-200);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        /* Stats Cards */
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid var(--gray-200);
+            transition: all 0.2s ease;
+        }
+
+        .stat-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        /* Tracking Card */
+        .tracking-card {
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .tracking-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--gray-500);
+        }
+
+        .empty-state-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            opacity: 0.3;
+        }
+
+        /* Search Bar */
+        .search-bar {
+            position: relative;
+        }
+
+        .search-bar input {
+            padding-left: 40px;
+        }
+
+        .search-bar-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--gray-400);
+        }
+
+        /* Dropdown Menu */
+        .dropdown {
+            position: relative;
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            right: 0;
+            top: 100%;
+            margin-top: 8px;
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            min-width: 200px;
+            padding: 8px;
+            z-index: 50;
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--gray-700);
+            font-size: 14px;
+        }
+
+        .dropdown-item:hover {
+            background: var(--gray-100);
+        }
+
+        .dropdown-item.danger {
+            color: var(--danger);
+        }
+
+        .dropdown-item.danger:hover {
+            background: #fee2e2;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 16px;
+            }
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body>
     <!-- Header -->
-    <header class="gradient-bg text-white shadow-lg">
-        <div class="container mx-auto px-4 py-6">
-            <div class="flex justify-between items-center">
-                <div>
-                    <h1 class="text-2xl font-bold">PostalHub</h1>
-                    <p class="text-blue-100">Track your packages across all carriers</p>
+    <header class="header">
+        <div class="container mx-auto px-4 py-4">
+            <div class="header-content flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-box text-white text-lg"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-900">PostalHub</h1>
+                        <p class="text-xs text-gray-500">Package Tracking</p>
+                    </div>
                 </div>
                 <div id="auth-section">
                     <div id="login-section" class="hidden">
-                        <button id="login-btn" class="bg-white text-blue-600 px-6 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors">
-                            Sign in with Google
+                        <button id="login-btn" class="btn btn-primary">
+                            <i class="fab fa-google"></i>
+                            Sign in
                         </button>
                     </div>
-                    <div id="user-section" class="hidden flex items-center space-x-4">
-                        <div class="text-right">
-                            <p class="font-medium" id="user-name"></p>
-                            <p class="text-sm text-blue-100" id="user-email"></p>
+                    <div id="user-section" class="hidden flex items-center gap-4">
+                        <div class="text-right hidden md:block">
+                            <p class="font-medium text-sm text-gray-900" id="user-name"></p>
+                            <p class="text-xs text-gray-500" id="user-email"></p>
                         </div>
-                        <img id="user-avatar" class="w-10 h-10 rounded-full border-2 border-white" src="" alt="Avatar">
-                        <button id="logout-btn" class="text-white hover:text-blue-200 transition-colors">
-                            Logout
-                        </button>
+                        <div class="dropdown">
+                            <button class="flex items-center gap-2 focus:outline-none">
+                                <img id="user-avatar" class="w-10 h-10 rounded-full border-2 border-gray-200" src="" alt="Avatar">
+                                <i class="fas fa-chevron-down text-gray-400 text-xs"></i>
+                            </button>
+                            <div class="dropdown-menu hidden" id="user-menu">
+                                <div class="dropdown-item" id="logout-btn">
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    <span>Sign out</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -47,124 +435,176 @@
     </header>
 
     <!-- Main Content -->
-    <main class="container mx-auto px-4 py-8">
+    <main class="container mx-auto px-4 py-8 max-w-7xl">
         <!-- Login Section -->
-        <div id="login-content" class="max-w-md mx-auto text-center">
-            <div class="bg-white rounded-lg card-shadow p-8">
-                <h2 class="text-2xl font-bold text-gray-800 mb-4">Welcome to PostalHub</h2>
-                <p class="text-gray-600 mb-6">Sign in with your Google account to start tracking packages</p>
-                <button id="login-content-btn" class="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2">
-                    <svg class="w-5 h-5" viewBox="0 0 24 24">
-                        <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                        <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                        <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                        <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                    </svg>
-                    <span>Sign in with Google</span>
+        <div id="login-content" class="max-w-md mx-auto mt-20">
+            <div class="card card-elevated p-10 text-center fade-in">
+                <div class="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                    <i class="fas fa-box text-white text-3xl"></i>
+                </div>
+                <h2 class="text-3xl font-bold text-gray-900 mb-3">Welcome to PostalHub</h2>
+                <p class="text-gray-600 mb-8">Track all your packages in one place. Sign in to get started.</p>
+                <button id="login-content-btn" class="btn btn-primary w-full text-base py-3">
+                    <i class="fab fa-google"></i>
+                    <span>Continue with Google</span>
                 </button>
+                <p class="text-xs text-gray-500 mt-6">
+                    <i class="fas fa-shield-alt"></i>
+                    Secure authentication with Google
+                </p>
             </div>
         </div>
 
         <!-- Dashboard Section -->
         <div id="dashboard-content" class="hidden">
-            <!-- Add Tracking Form -->
-            <div class="bg-white rounded-lg card-shadow p-6 mb-8">
-                <h2 class="text-xl font-bold text-gray-800 mb-4">Add New Tracking</h2>
-                <form id="tracking-form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Welcome Banner -->
+            <div class="card bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-6 mb-8 fade-in">
+                <div class="flex items-center justify-between">
                     <div>
-                        <label for="tracking-number" class="block text-sm font-medium text-gray-700 mb-2">Tracking Number</label>
-                        <input type="text" id="tracking-number" name="trackingNumber" 
-                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                               placeholder="Enter tracking number" required>
+                        <h2 class="text-2xl font-bold mb-2">Welcome back, <span id="welcome-name"></span>!</h2>
+                        <p class="text-indigo-100">Track and manage all your packages from one dashboard.</p>
                     </div>
-                    <div>
-                        <label for="carrier" class="block text-sm font-medium text-gray-700 mb-2">Carrier</label>
-                        <select id="carrier" name="carrier" 
-                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                            <option value="">Select carrier</option>
+                    <div class="hidden md:block">
+                        <i class="fas fa-shipping-fast text-6xl opacity-20"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div class="stat-card fade-in" style="animation-delay: 0.1s">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 mb-1">Total Packages</p>
+                            <p class="text-3xl font-bold text-gray-900" id="stat-total">0</p>
+                        </div>
+                        <div class="stat-icon bg-blue-100 text-blue-600">
+                            <i class="fas fa-box"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card fade-in" style="animation-delay: 0.2s">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 mb-1">Pending</p>
+                            <p class="text-3xl font-bold text-gray-900" id="stat-pending">0</p>
+                        </div>
+                        <div class="stat-icon bg-yellow-100 text-yellow-600">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card fade-in" style="animation-delay: 0.3s">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 mb-1">In Transit</p>
+                            <p class="text-3xl font-bold text-gray-900" id="stat-processing">0</p>
+                        </div>
+                        <div class="stat-icon bg-indigo-100 text-indigo-600">
+                            <i class="fas fa-truck"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-card fade-in" style="animation-delay: 0.4s">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600 mb-1">Delivered</p>
+                            <p class="text-3xl font-bold text-gray-900" id="stat-completed">0</p>
+                        </div>
+                        <div class="stat-icon bg-green-100 text-green-600">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Tracking Form -->
+            <div class="card p-6 mb-8 fade-in">
+                <div class="flex items-center justify-between mb-6">
+                    <h2 class="text-xl font-bold text-gray-900">
+                        <i class="fas fa-plus-circle text-indigo-600 mr-2"></i>
+                        Add New Tracking
+                    </h2>
+                </div>
+                <form id="tracking-form" class="grid grid-cols-1 md:grid-cols-12 gap-4">
+                    <div class="md:col-span-5">
+                        <label for="tracking-number" class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-barcode mr-1"></i>
+                            Tracking Number
+                        </label>
+                        <input type="text" id="tracking-number" name="trackingNumber" 
+                               class="input" 
+                               placeholder="Enter tracking number (auto-detect carrier)"
+                               required>
+                        <p class="text-xs text-gray-500 mt-1">We'll automatically detect the carrier</p>
+                    </div>
+                    <div class="md:col-span-4">
+                        <label for="carrier" class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-truck mr-1"></i>
+                            Carrier (Optional)
+                        </label>
+                        <select id="carrier" name="carrier" class="input">
+                            <option value="">Auto-detect</option>
                             <option value="USPS">USPS</option>
                             <option value="UPS">UPS</option>
                             <option value="FedEx">FedEx</option>
                             <option value="DHL">DHL</option>
+                            <option value="Amazon">Amazon</option>
                         </select>
                     </div>
-                    <div class="flex items-end">
-                        <button type="submit" 
-                                class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors">
-                            Track Package
+                    <div class="md:col-span-3 flex items-end">
+                        <button type="submit" class="btn btn-primary w-full py-3">
+                            <i class="fas fa-search"></i>
+                            <span>Track Package</span>
                         </button>
                     </div>
                 </form>
             </div>
 
-            <!-- Dashboard Stats -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div class="bg-white rounded-lg card-shadow p-6">
-                    <div class="flex items-center">
-                        <div class="p-2 bg-blue-100 rounded-lg">
-                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
-                            </svg>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-sm font-medium text-gray-600">Total Packages</p>
-                            <p class="text-2xl font-bold text-gray-900" id="stat-total">0</p>
-                        </div>
+            <!-- Search and Filters -->
+            <div class="card p-4 mb-6 fade-in">
+                <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
+                    <div class="search-bar flex-1 w-full md:w-auto">
+                        <i class="fas fa-search search-bar-icon"></i>
+                        <input type="text" id="search-input" class="input" placeholder="Search by tracking number or carrier...">
                     </div>
-                </div>
-                <div class="bg-white rounded-lg card-shadow p-6">
-                    <div class="flex items-center">
-                        <div class="p-2 bg-yellow-100 rounded-lg">
-                            <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-sm font-medium text-gray-600">Pending</p>
-                            <p class="text-2xl font-bold text-gray-900" id="stat-pending">0</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-lg card-shadow p-6">
-                    <div class="flex items-center">
-                        <div class="p-2 bg-blue-100 rounded-lg">
-                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-sm font-medium text-gray-600">Processing</p>
-                            <p class="text-2xl font-bold text-gray-900" id="stat-processing">0</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-lg card-shadow p-6">
-                    <div class="flex items-center">
-                        <div class="p-2 bg-green-100 rounded-lg">
-                            <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <div class="ml-4">
-                            <p class="text-sm font-medium text-gray-600">Completed</p>
-                            <p class="text-2xl font-bold text-gray-900" id="stat-completed">0</p>
-                        </div>
+                    <div class="flex gap-2">
+                        <select id="filter-status" class="input" style="width: auto; min-width: 150px;">
+                            <option value="">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="processing">In Transit</option>
+                            <option value="completed">Delivered</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                        <select id="filter-carrier" class="input" style="width: auto; min-width: 150px;">
+                            <option value="">All Carriers</option>
+                            <option value="USPS">USPS</option>
+                            <option value="UPS">UPS</option>
+                            <option value="FedEx">FedEx</option>
+                            <option value="DHL">DHL</option>
+                            <option value="Amazon">Amazon</option>
+                        </select>
                     </div>
                 </div>
             </div>
 
             <!-- Tracking List -->
-            <div class="bg-white rounded-lg card-shadow">
-                <div class="p-6 border-b border-gray-200">
-                    <h2 class="text-xl font-bold text-gray-800">Your Packages</h2>
+            <div class="card fade-in">
+                <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+                    <h2 class="text-xl font-bold text-gray-900">
+                        <i class="fas fa-list mr-2 text-indigo-600"></i>
+                        Your Packages
+                    </h2>
+                    <span class="text-sm text-gray-500" id="tracking-count">0 packages</span>
                 </div>
                 <div class="p-6">
                     <div id="tracking-list">
-                        <div class="text-center text-gray-500 py-8">
-                            <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
-                            </svg>
-                            <p>No packages tracked yet. Add your first tracking number above!</p>
+                        <div class="empty-state">
+                            <div class="empty-state-icon">
+                                <i class="fas fa-box-open text-6xl"></i>
+                            </div>
+                            <h3 class="text-lg font-semibold text-gray-700 mb-2">No packages yet</h3>
+                            <p class="text-gray-500 mb-4">Add your first tracking number to get started!</p>
                         </div>
                     </div>
                 </div>
@@ -173,13 +613,17 @@
     </main>
 
     <!-- Loading Overlay -->
-    <div id="loading-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 flex items-center space-x-4">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <span class="text-gray-700">Processing...</span>
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 backdrop-filter backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="card p-8 flex flex-col items-center gap-4">
+            <div class="spinner w-12 h-12"></div>
+            <span class="text-gray-700 font-medium">Processing...</span>
         </div>
     </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
 
     <script src="js/app.js"></script>
 </body>
 </html>
+

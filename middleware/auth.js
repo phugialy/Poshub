@@ -1,5 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../lib/prisma');
+const { getConfig } = require('../config/env');
+
+const config = getConfig();
 
 /**
  * Middleware to verify NextAuth.js JWT token
@@ -15,7 +18,7 @@ const verifyNextAuthToken = async (req, res, next) => {
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
     
     // Verify JWT token from NextAuth.js
-    const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET);
+    const decoded = jwt.verify(token, config.NEXTAUTH_SECRET);
     
     if (!decoded || !decoded.sub) {
       return res.status(401).json({ error: 'Invalid token' });
@@ -48,7 +51,7 @@ const optionalAuth = async (req, res, next) => {
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET);
+      const decoded = jwt.verify(token, config.NEXTAUTH_SECRET);
       
       if (decoded && decoded.sub) {
         const user = await prisma.userProfile.findUnique({

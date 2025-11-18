@@ -4,8 +4,13 @@ const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/prisma');
 const { verifyNextAuthToken } = require('../middleware/auth');
+const { verifySupabaseToken } = require('../middleware/supabase-auth');
+const { getConfig } = require('../config/env');
+const { getSupabaseConfig } = require('../config/supabase');
+const { authLimiter } = require('../config/rate-limit');
 
 const router = express.Router();
+const config = getConfig();
 
 /**
  * GET /api/auth/google
@@ -13,8 +18,8 @@ const router = express.Router();
  */
 router.get('/google', (req, res) => {
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${process.env.GOOGLE_CLIENT_ID}&` +
-    `redirect_uri=${encodeURIComponent(process.env.NEXTAUTH_URL + '/api/auth/google/callback')}&` +
+    `client_id=${config.GOOGLE_CLIENT_ID}&` +
+    `redirect_uri=${encodeURIComponent(config.FRONTEND_URL + '/api/auth/google/callback')}&` +
     `response_type=code&` +
     `scope=${encodeURIComponent('https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile')}&` +
     `access_type=offline&` +
@@ -29,8 +34,8 @@ router.get('/google', (req, res) => {
  */
 router.get('/google-url', (req, res) => {
   const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${process.env.GOOGLE_CLIENT_ID}&` +
-    `redirect_uri=${encodeURIComponent(process.env.NEXTAUTH_URL + '/api/auth/google/callback')}&` +
+    `client_id=${config.GOOGLE_CLIENT_ID}&` +
+    `redirect_uri=${encodeURIComponent(config.FRONTEND_URL + '/api/auth/google/callback')}&` +
     `response_type=code&` +
     `scope=${encodeURIComponent('https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile')}&` +
     `access_type=offline&` +
@@ -53,11 +58,11 @@ router.get('/google/callback', async (req, res) => {
 
     // Exchange code for access token
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      client_id: config.GOOGLE_CLIENT_ID,
+      client_secret: config.GOOGLE_CLIENT_SECRET,
       code: code,
       grant_type: 'authorization_code',
-      redirect_uri: process.env.NEXTAUTH_URL + '/api/auth/google/callback'
+      redirect_uri: config.FRONTEND_URL + '/api/auth/google/callback'
     });
 
     const { access_token } = tokenResponse.data;
@@ -104,7 +109,7 @@ router.get('/google/callback', async (req, res) => {
         email: user.email,
         name: user.fullName 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '1h' }
     );
 
@@ -114,7 +119,7 @@ router.get('/google/callback', async (req, res) => {
         sub: user.id,
         type: 'refresh' 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -138,7 +143,7 @@ router.get('/google/callback', async (req, res) => {
             window.close();
           } else {
             // Fallback: redirect to main page with token
-            window.location.href = '${process.env.NEXTAUTH_URL}/?token=${accessToken}';
+            window.location.href = '${config.FRONTEND_URL}/?token=${accessToken}';
           }
         </script>
         <p>Authentication successful! This window should close automatically.</p>
@@ -151,27 +156,6 @@ router.get('/google/callback', async (req, res) => {
   } catch (error) {
     console.error('Google OAuth error:', error);
     res.status(500).json({ error: 'Authentication failed' });
-  }
-});
-
-/**
- * GET /api/auth/session
- * Get current session info
- */
-router.get('/session', verifyNextAuthToken, async (req, res) => {
-  try {
-    res.json({
-      success: true,
-      user: {
-        id: req.user.id,
-        email: req.user.email,
-        name: req.user.fullName,
-        image: req.user.avatarUrl,
-      }
-    });
-  } catch (error) {
-    console.error('Session error:', error);
-    res.status(500).json({ error: 'Failed to get session' });
   }
 });
 
@@ -211,7 +195,7 @@ router.post('/refresh', verifyNextAuthToken, async (req, res) => {
         email: req.user.email,
         name: req.user.fullName 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '1h' }
     );
 
@@ -221,7 +205,7 @@ router.post('/refresh', verifyNextAuthToken, async (req, res) => {
         sub: req.user.id,
         type: 'refresh' 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -247,7 +231,7 @@ router.post('/refresh', verifyNextAuthToken, async (req, res) => {
  * POST /api/auth/login
  * Login with email and password
  */
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -283,7 +267,7 @@ router.post('/login', async (req, res) => {
         email: user.email,
         name: user.fullName 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '1h' }
     );
 
@@ -293,7 +277,7 @@ router.post('/login', async (req, res) => {
         sub: user.id,
         type: 'refresh' 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -319,7 +303,7 @@ router.post('/login', async (req, res) => {
  * POST /api/auth/register
  * Register new user
  */
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
     const { email, password, name } = req.body;
 
@@ -360,7 +344,7 @@ router.post('/register', async (req, res) => {
         email: user.email,
         name: user.fullName 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '1h' }
     );
 
@@ -370,7 +354,7 @@ router.post('/register', async (req, res) => {
         sub: user.id,
         type: 'refresh' 
       },
-      process.env.NEXTAUTH_SECRET || 'fallback-secret',
+      config.NEXTAUTH_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -405,6 +389,147 @@ router.post('/logout', verifyNextAuthToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Logout error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ========================================
+// SUPABASE AUTH ENDPOINTS
+// ========================================
+
+/**
+ * GET /api/auth/supabase/config
+ * Get Supabase configuration for client-side initialization
+ * This allows frontend applications to initialize Supabase client
+ * 
+ * Returns:
+ * - supabaseUrl: Supabase project URL
+ * - supabaseAnonKey: Public anon key for client-side use
+ */
+router.get('/supabase/config', (req, res) => {
+  try {
+    const config = getSupabaseConfig();
+    
+    if (!config.supabaseUrl || !config.supabaseAnonKey) {
+      return res.status(503).json({
+        error: 'Supabase configuration not available',
+        code: 'SUPABASE_NOT_CONFIGURED'
+      });
+    }
+    
+    res.json({
+      supabaseUrl: config.supabaseUrl,
+      supabaseAnonKey: config.supabaseAnonKey
+    });
+  } catch (error) {
+    console.error('Supabase config error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/auth/session
+ * Get current session info
+ * 
+ * Supports both Supabase Auth and legacy NextAuth tokens
+ * Tries Supabase Auth first, falls back to NextAuth for backward compatibility
+ */
+router.get('/session', async (req, res) => {
+  try {
+    // Try Supabase Auth first
+    try {
+      await new Promise((resolve, reject) => {
+        verifySupabaseToken(req, res, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      
+      // If Supabase auth succeeded, return user
+      return res.json({
+        success: true,
+        user: {
+          id: req.user.id,
+          email: req.user.email,
+          name: req.user.fullName,
+          image: req.user.avatarUrl,
+        }
+      });
+    } catch (supabaseError) {
+      // Fall back to NextAuth if Supabase fails
+      await new Promise((resolve, reject) => {
+        verifyNextAuthToken(req, res, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      
+      return res.json({
+        success: true,
+        user: {
+          id: req.user.id,
+          email: req.user.email,
+          name: req.user.fullName,
+          image: req.user.avatarUrl,
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Session error:', error);
+    return res.status(401).json({ 
+      error: 'Not authenticated',
+      code: 'NOT_AUTHENTICATED'
+    });
+  }
+});
+
+/**
+ * POST /api/auth/supabase/refresh
+ * Refresh Supabase session
+ * 
+ * Note: Supabase handles token refresh automatically on the client side.
+ * This endpoint validates the current token and returns user info.
+ * For actual token refresh, clients should use Supabase SDK's refreshSession().
+ */
+router.post('/supabase/refresh', verifySupabaseToken, async (req, res) => {
+  try {
+    // Supabase handles refresh automatically on client side
+    // This endpoint just validates the current token and returns user info
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        email: req.user.email,
+        name: req.user.fullName,
+        image: req.user.avatarUrl
+      },
+      message: 'Token is valid. Use Supabase SDK refreshSession() for token refresh.'
+    });
+  } catch (error) {
+    console.error('Refresh error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/auth/supabase/user
+ * Get current authenticated user profile (Supabase Auth)
+ * Alternative to /api/auth/user for Supabase Auth users
+ */
+router.get('/supabase/user', verifySupabaseToken, async (req, res) => {
+  try {
+    res.json({
+      user: {
+        id: req.user.id,
+        email: req.user.email,
+        full_name: req.user.fullName,
+        avatar_url: req.user.avatarUrl,
+        created_at: req.user.createdAt,
+        updated_at: req.user.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

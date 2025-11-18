@@ -2,8 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+
+// Logger
+const { createLogger } = require('./utils/logger');
+const logger = createLogger('Server');
+
+// Validate environment configuration before starting
+const { getConfig } = require('./config/env');
+const config = getConfig();
+
+// Rate limiting configuration
+const { apiLimiter } = require('./config/rate-limit');
 
 // Remove NextAuth.js - using custom JWT auth instead
 const authRoutes = require('./routes/auth');
@@ -13,26 +23,22 @@ const externalRoutes = require('./routes/external');
 const dashboardRoutes = require('./routes/dashboard');
 
 // Initialize Prisma client
-require('./lib/prisma');
+const { testDatabaseConnection } = require('./lib/prisma');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.PORT;
 
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL || 'https://yourdomain.com'] 
+  origin: config.NODE_ENV === 'production' 
+    ? [config.FRONTEND_URL] 
     : ['http://localhost:3000', 'http://localhost:3001'],
   credentials: true
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
+// Global rate limiting
+app.use(apiLimiter);
 
 // Logging
 app.use(morgan('combined'));
@@ -67,20 +73,41 @@ app.use('*', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  logger.exception(err, 'Request error', {
+    path: req.path,
+    method: req.method,
+    status: err.status || 500
+  });
   res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' 
+    error: config.NODE_ENV === 'production' 
       ? 'Internal server error' 
       : err.message
   });
 });
 
 // Only start server if not in Vercel environment
-if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`PostalHub Backend Server running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+if (config.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  // Test database connection before starting server
+  testDatabaseConnection().then(isConnected => {
+    if (!isConnected) {
+      logger.warn('Database connection failed. Server will start but database operations may fail.');
+    }
+    
+    app.listen(PORT, () => {
+      logger.info('Server started', {
+        port: PORT,
+        environment: config.NODE_ENV,
+        nodeVersion: process.version
+      });
+    });
+  }).catch(error => {
+    logger.exception(error, 'Failed to start server');
+    process.exit(1);
   });
+} else {
+  // In production (Vercel), test connection but don't block
+  testDatabaseConnection();
+  logger.info('Running in serverless mode (Vercel)');
 }
 
 module.exports = app;

@@ -26,6 +26,11 @@ async function main() {
       name: 'DHL',
       displayName: 'DHL International',
       apiEndpoint: 'https://api-eu.dhl.com'
+    },
+    {
+      name: 'Amazon',
+      displayName: 'Amazon Logistics',
+      apiEndpoint: 'https://api.amazon.com/logistics'
     }
   ];
 
