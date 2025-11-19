@@ -1,0 +1,21 @@
+.carrier-logo-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.carrier-logo-default {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.carrier-emoji {
+  display: block;
+  line-height: 1;
+}
+
